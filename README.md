@@ -28,6 +28,11 @@ A new password can be generated using the following command:
 echo $(htpasswd -nB admin) | sed -e s/\\$/\\$\\$/g
 ```
 
+Or use the shell script:
+```
+generate_traefik_basic_auth.sh
+``` 
+
 ## Add other services
 
 To make other services visible labels have to be added like below: 
