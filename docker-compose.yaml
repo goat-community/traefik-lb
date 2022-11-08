@@ -1,0 +1,84 @@
+version: "3.8"
+
+networks:
+  proxy:
+    name: traefik-global-proxy
+  socket_proxy:
+    name: global-socket-proxy
+
+services:
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: socket-proxy
+    privileged: true
+    environment:
+      - CONTAINERS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - socket_proxy
+    restart: always
+
+  traefik:
+    image: traefik:v2.9.4
+    container_name: traefik
+    ports:
+      - 80:80
+      - 443:443
+    depends_on:
+      - socket-proxy
+    entrypoint:
+      - /entrypoint-shim.sh
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=tcp://socket-proxy:2375"
+      - "--providers.docker.network=proxy"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.filename=/etc/traefik/config.yml"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myhttpchallenge.acme.httpchallenge=true"
+      - "--certificatesresolvers.myhttpchallenge.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.myhttpchallenge.acme.email=$EMAIL"
+      - "--certificatesresolvers.myhttpchallenge.acme.storage=/letsencrypt/acme.json"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=admin:$$2y$$05$$GGeLEnClIsWmz8QTr5LjfuhjD.RN4Ym3f/t1Pfjl2jQGI4Fx7UOTm"
+      - "traefik.http.routers.traefik.rule=Host(`$TRAEFIK_DOMAIN`)"
+      - "traefik.http.routers.traefik.tls.certresolver=myhttpchallenge"
+      - "traefik.http.routers.traefik.middlewares=traefik-auth"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.service=api@internal"
+    volumes:
+      - $PWD/traefik/entrypoint-shim.sh:/entrypoint-shim.sh
+      - $PWD/traefik/config.yml:/etc/traefik/config.yml
+      - $PWD/data/traefik/letsencrypt:/letsencrypt
+    networks:
+      - proxy
+      - socket_proxy
+    restart: always
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - $PWD/data/portainer:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`$PORTAINER_DOMAIN`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=myhttpchallenge"
+      - "traefik.http.routers.portainer.tls=true"
+      - "traefik.http.services.portainer.loadBalancer.server.port=9000"
+    restart: always
